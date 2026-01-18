@@ -1,9 +1,20 @@
 <template>
-  <q-page class="q-pa-md q-pa-lg-xl">
+  <q-page :class="$q.dark.isActive ? 'q-pa-md q-pa-lg-xl bg-dark text-white' : 'q-pa-md q-pa-lg-xl bg-grey-1'">
     <div class="row items-center justify-between q-mb-lg">
        <div>
-          <div class="text-h4 text-weight-bold text-dark">Admin Portal</div>
-          <div class="text-subtitle1 text-grey-7">Manage hospital equipment and logs</div>
+          <div :class="$q.dark.isActive ? 'text-h4 text-weight-bold text-white' : 'text-h4 text-weight-bold text-dark'">Admin Portal</div>
+          <div :class="$q.dark.isActive ? 'text-subtitle1 text-grey-4' : 'text-subtitle1 text-grey-7'">Manage hospital equipment and logs</div>
+       </div>
+       <div>
+          <!-- Explicit Account Button -->
+          <q-btn 
+            flat 
+            icon="manage_accounts" 
+            label="Account Settings" 
+            no-caps 
+            class="q-mr-sm"
+            to="/account"
+          />
        </div>
     </div>
     
@@ -51,17 +62,24 @@
                  label="Add New Equipment" 
                  no-caps 
                  unelevated 
-                 @click="showAddDeviceDialog = true" 
+                 @click="openAddDialog" 
                />
             </template>
             
             <template v-slot:body-cell-actions="props">
-               <q-td :props="props">
+               <q-td :props="props" class="q-gutter-x-sm">
                  <q-btn flat round icon="qr_code" color="primary" @click="showQRCode(props.row)">
                    <q-tooltip>View QR Code</q-tooltip>
                  </q-btn>
-                 <q-btn flat round icon="visibility" color="grey-7" @click="viewDevice(props.row)" />
-                 <q-btn flat round icon="delete" color="negative" @click="confirmDelete(props.row)" />
+                 <q-btn flat round icon="visibility" color="grey-7" @click="viewDevice(props.row)">
+                   <q-tooltip>View Details</q-tooltip>
+                 </q-btn>
+                 <q-btn flat round icon="edit" color="blue-7" @click="openEditDialog(props.row)">
+                   <q-tooltip>Edit Equipment</q-tooltip>
+                 </q-btn>
+                 <q-btn flat round icon="delete" color="negative" @click="confirmDelete(props.row)">
+                   <q-tooltip>Delete</q-tooltip>
+                 </q-btn>
                </q-td>
             </template>
           </q-table>
@@ -79,11 +97,11 @@
       </q-tab-panels>
     </q-card>
 
-    <!-- Add Device Dialog -->
+    <!-- Add/Edit Device Dialog -->
     <q-dialog v-model="showAddDeviceDialog" persistent>
-      <q-card style="min-width: 400px; border-radius: 12px">
+      <q-card style="min-width: 400px; border-radius: 12px" :class="$q.dark.isActive ? 'bg-dark text-white' : ''">
         <q-card-section class="row items-center q-pb-none">
-          <div class="text-h6 text-weight-bold">Add Equipment</div>
+          <div class="text-h6 text-weight-bold">{{ isEditMode ? 'Edit Equipment' : 'Add Equipment' }}</div>
           <q-space />
           <q-btn icon="close" flat round dense v-close-popup />
         </q-card-section>
@@ -136,7 +154,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../supabase'
 import { useQuasar } from 'quasar'
@@ -151,11 +169,24 @@ const filter = ref('')
 
 // Add Device
 const showAddDeviceDialog = ref(false)
-const categoryOptions = ['Cardiac Monitor', 'Infusion Pump', 'Syringe Pump', 'Ventilator', 'Other']
-const newDevice = ref({
+const isEditMode = ref(false) // Added edit mode support
+const categoryOptions = [
+  'Cardiac Monitor', 
+  'Infusion Pump', 
+  'Syringe Pump', 
+  'CPAP', 
+  'Ventilator', 
+  'High Flow Machine', 
+  'Centrifuge', 
+  'SpO2 Sensor', 
+  'Concentrator', 
+  'Other'
+]
+const newDevice = ref({ // Renamed in template usage? No, keeping var name but logic updated
+  id: null,
   device_name: '',
   device_id: '',
-  device_group: '', // Used as Category
+  device_group: '', 
   model_no: '',
   serial_no: ''
 })
@@ -186,15 +217,48 @@ const fetchDevices = async () => {
   loadingDevices.value = false
 }
 
+// Wrapper to open Add Dialog
+const openAddDialog = () => {
+  isEditMode.value = false
+  newDevice.value = { id: null, device_name: '', device_id: '', device_group: '', model_no: '', serial_no: '' }
+  showAddDeviceDialog.value = true
+}
+
+// Wrapper to open Edit
+const openEditDialog = (row) => {
+   isEditMode.value = true
+   newDevice.value = { ...row }
+   showAddDeviceDialog.value = true
+}
+
 const addDevice = async () => {
-  const { error } = await supabase.from('devices').insert([newDevice.value])
-  if (error) {
-    $q.notify({ type: 'negative', message: error.message })
-  } else {
-    $q.notify({ type: 'positive', message: 'Equipment added successfully', position: 'top' })
-    fetchDevices()
-    newDevice.value = { device_name: '', device_id: '', device_group: '', model_no: '', serial_no: '' }
+  $q.loading.show({ message: isEditMode.value ? 'Updating...' : 'Adding equipment...' })
+  try {
+     const payload = {
+        device_name: newDevice.value.device_name,
+        device_group: newDevice.value.device_group,
+        device_id: newDevice.value.device_id,
+        model_no: newDevice.value.model_no,
+        serial_no: newDevice.value.serial_no
+     }
+
+     if (isEditMode.value) {
+        const { error } = await supabase.from('devices').update(payload).eq('id', newDevice.value.id)
+        if (error) throw error
+        $q.notify({ type: 'positive', message: 'Equipment updated successfully' })
+     } else {
+        const { error } = await supabase.from('devices').insert([payload])
+        if (error) throw error
+        $q.notify({ type: 'positive', message: 'Equipment added successfully' })
+     }
+
+    await fetchDevices()
     showAddDeviceDialog.value = false
+  } catch (err) {
+    console.error('Save Error:', err)
+    $q.notify({ type: 'negative', message: 'Operation failed: ' + (err.error_description || err.message) })
+  } finally {
+    $q.loading.hide()
   }
 }
 
@@ -206,7 +270,17 @@ const confirmDelete = (row) => {
     persistent: true,
     ok: { label: 'Delete', color: 'negative', flat: true }
   }).onOk(async () => {
+    $q.loading.show({ message: 'Deleting...' })
+    
+    // Manual Cascade
+    if (row.device_id) {
+       await supabase.from('charging_charts').delete().eq('device_id', row.device_id)
+       await supabase.from('bme_charts').delete().eq('device_id', row.device_id)
+    }
+
     const { error } = await supabase.from('devices').delete().eq('id', row.id)
+    $q.loading.hide()
+
     if (error) {
       $q.notify({ type: 'negative', message: error.message })
     } else {
@@ -222,10 +296,7 @@ const viewDevice = (row) => {
 
 const showQRCode = async (row) => {
   selectedDevice.value = row
-  // The URL that the QR code points to. 
-  // In production, change window.location.origin to your actual domain if needed.
   const url = `${window.location.origin}/device/${row.id}`
-  
   try {
     qrCodeUrl.value = await QRCode.toDataURL(url)
     qrDialog.value = true
@@ -253,5 +324,22 @@ onMounted(() => {
 <style scoped>
 .rounded-borders {
   border-radius: 12px;
+}
+</style>
+
+<style>
+/* Global override for table in dark mode */
+.body--dark .q-table__container {
+  background-color: #1d1d1d !important;
+  color: #fff !important;
+  border: 1px solid #333 !important;
+}
+.body--dark .q-table__bottom {
+  background-color: #1d1d1d !important;
+  color: #fff !important; 
+  border-top: 1px solid #333 !important;
+}
+.body--dark .q-table thead tr th {
+  color: #ddd !important;
 }
 </style>

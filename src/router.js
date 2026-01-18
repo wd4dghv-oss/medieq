@@ -10,6 +10,7 @@ const routes = [
             { path: 'dashboard', component: () => import('./pages/DashboardPage.vue'), meta: { requiresAuth: true } },
             { path: 'admin', component: () => import('./pages/AdminDashboardPage.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
             { path: 'device/:id', component: () => import('./pages/DeviceDetailsPage.vue'), meta: { requiresAuth: true } }, // New Route
+            { path: 'account', component: () => import('./pages/AccountPage.vue'), meta: { requiresAuth: true } },
             { path: 'unauthorized', component: () => import('./pages/Error403.vue') }
         ]
     },

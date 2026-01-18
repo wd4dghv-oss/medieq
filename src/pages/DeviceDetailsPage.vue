@@ -79,13 +79,19 @@
                  <template v-slot:top-right>
                     <q-btn flat round icon="refresh" @click="fetchLogs" />
                  </template>
+                 <template v-slot:body-cell-actions="props">
+                    <q-td :props="props">
+                      <q-btn flat round dense icon="edit" color="primary" @click="openEditCharging(props.row)" />
+                      <q-btn flat round dense icon="delete" color="negative" @click="confirmDeleteLog('charging_charts', props.row.id)" />
+                    </q-td>
+                 </template>
                </q-table>
             </q-tab-panel>
 
             <!-- BME Logs -->
             <q-tab-panel name="bme">
                <div class="row justify-end q-mb-md">
-                  <q-btn color="secondary" label="Add BME Log" icon="add" size="sm" @click="showAddBMEDialog = true" />
+                  <q-btn color="secondary" label="Add BME Log" icon="add" size="sm" @click="openAddBME" />
                </div>
                <q-table
                  :rows="bmeLogs"
@@ -93,7 +99,26 @@
                  row-key="id"
                  flat
                  :loading="loadingLogs"
-               />
+               >
+                 <template v-slot:body-cell-status="props">
+                    <q-td :props="props">
+                      <q-chip 
+                        :color="props.row.status === 'Fixed' ? 'positive' : 'warning'" 
+                        text-color="white" 
+                        dense 
+                        square
+                      >
+                        {{ props.row.status || 'Pending' }}
+                      </q-chip>
+                    </q-td>
+                 </template>
+                 <template v-slot:body-cell-actions="props">
+                    <q-td :props="props">
+                      <q-btn flat round dense icon="edit" color="primary" @click="openEditBME(props.row)" />
+                      <q-btn flat round dense icon="delete" color="negative" @click="confirmDeleteLog('bme_charts', props.row.id)" />
+                    </q-td>
+                 </template>
+               </q-table>
             </q-tab-panel>
 
           </q-tab-panels>
@@ -102,22 +127,51 @@
 
     </div>
 
-    <!-- BME Dialog -->
-    <q-dialog v-model="showAddBMEDialog">
+    <!-- BME Dialog (Add/Edit) -->
+    <q-dialog v-model="showBMEDialog">
       <q-card style="min-width: 350px">
         <q-card-section>
-          <div class="text-h6">Log BME Status</div>
+          <div class="text-h6">{{ isEditMode ? 'Edit BME Log' : 'Log BME Status' }}</div>
         </q-card-section>
 
         <q-card-section class="q-pt-none">
-          <q-input filled v-model="newBME.reason" label="Reason/Status" class="q-mb-md" />
-          <q-input filled v-model="newBME.send_date" type="date" label="Send Date" class="q-mb-md" />
-          <q-input filled v-model="newBME.receive_date" type="date" label="Receive Date (Optional)" />
+          <q-input filled v-model="formBME.reason" label="Reason/Status" class="q-mb-md" />
+          
+          <q-select 
+            filled 
+            v-model="formBME.status" 
+            :options="['Pending', 'Fixed', 'Unrepairable', 'Service Completed']" 
+            label="Repair Status" 
+            class="q-mb-md" 
+          />
+
+          <q-input filled v-model="formBME.send_date" type="date" label="Send Date" class="q-mb-md" />
+          <q-input filled v-model="formBME.receive_date" type="date" label="Receive Date (Optional)" stack-label hint="Update this when received" />
         </q-card-section>
 
         <q-card-actions align="right">
           <q-btn flat label="Cancel" v-close-popup />
-          <q-btn flat label="Save" color="primary" @click="addBMELog" />
+          <q-btn flat label="Save" color="primary" @click="saveBMELog" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- Charging Edit Dialog -->
+    <q-dialog v-model="showChargingDialog">
+      <q-card style="min-width: 350px">
+        <q-card-section>
+          <div class="text-h6">Edit Charging Log</div>
+        </q-card-section>
+
+        <q-card-section class="q-pt-none">
+          <q-input filled v-model="formCharging.charging_date" type="date" label="Date" class="q-mb-md" />
+          <q-input filled v-model="formCharging.charging_start" type="time" label="Start Time" class="q-mb-md" />
+          <q-input filled v-model="formCharging.charging_end" type="time" label="End Time" />
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" v-close-popup />
+          <q-btn flat label="Save" color="primary" @click="saveChargingLog" />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -145,27 +199,42 @@ const chargingLogs = ref([])
 const bmeLogs = ref([])
 const loadingLogs = ref(false)
 
-// BME Form
-const showAddBMEDialog = ref(false)
-const newBME = ref({
+// BME Form State
+const showBMEDialog = ref(false)
+const isEditMode = ref(false)
+const formBME = ref({
+  id: null,
   reason: '',
-  send_date: date.formatDate(Date.now(), 'YYYY-MM-DD'),
+  status: 'Pending',
+  send_date: '',
   receive_date: ''
 })
 
-const statusLabel = computed(() => 'Active') // Placeholder logic
+// Charging Form State
+const showChargingDialog = ref(false)
+const formCharging = ref({
+  id: null,
+  charging_date: '',
+  charging_start: '',
+  charging_end: ''
+})
+
+const statusLabel = computed(() => 'Active') 
 const statusColor = computed(() => 'positive')
 
 const chargingColumns = [
-  { name: 'date', label: 'Date', field: 'charging_date', sortable: true, format: val => date.formatDate(val, 'YYYY-MM-DD') },
-  { name: 'start', label: 'Start Time', field: 'charging_start', sortable: true },
-  { name: 'end', label: 'End Time', field: 'charging_end' }
+  { name: 'date', label: 'Date', field: 'charging_date', sortable: true, format: val => date.formatDate(val, 'YYYY-MM-DD'), align: 'left' },
+  { name: 'start', label: 'Start Time', field: 'charging_start', sortable: true, align: 'left' },
+  { name: 'end', label: 'End Time', field: 'charging_end', align: 'left' },
+  { name: 'actions', label: 'Actions', field: 'actions', align: 'right' }
 ]
 
 const bmeColumns = [
   { name: 'reason', label: 'Reason', field: 'reason', align: 'left' },
-  { name: 'send', label: 'Sent', field: 'send_date', sortable: true },
-  { name: 'receive', label: 'Received', field: 'receive_date' }
+  { name: 'status', label: 'Status', field: 'status', align: 'left', sortable: true },
+  { name: 'send', label: 'Sent', field: 'send_date', sortable: true, align: 'left' },
+  { name: 'receive', label: 'Received', field: 'receive_date', align: 'left' },
+  { name: 'actions', label: 'Actions', field: 'actions', align: 'right' }
 ]
 
 // --- Actions ---
@@ -196,8 +265,9 @@ const fetchLogs = async () => {
   const { data: cLogs } = await supabase
     .from('charging_charts')
     .select('*')
-    .eq('device_id', device.value.device_id) // Assuming linking by device_id string, not UUID PK for now
-    .order('created_at', { ascending: false })
+    .eq('device_id', device.value.device_id) 
+    .order('charging_date', { ascending: false })
+    .order('charging_start', { ascending: false })
   
   if (cLogs) chargingLogs.value = cLogs
 
@@ -206,7 +276,7 @@ const fetchLogs = async () => {
     .from('bme_charts')
     .select('*')
     .eq('device_id', device.value.device_id)
-    .order('created_at', { ascending: false })
+    .order('send_date', { ascending: false })
 
   if (bLogs) bmeLogs.value = bLogs
   
@@ -218,13 +288,14 @@ const quickLogCharge = async () => {
   loggingCharge.value = true
   
   const now = new Date()
+  const twoHoursLater = date.addToDate(now, { hours: 2 })
   const payload = {
     device_name: device.value.device_name,
     device_id: device.value.device_id,
     device_group: device.value.device_group,
     charging_date: date.formatDate(now, 'YYYY-MM-DD'),
     charging_start: date.formatDate(now, 'HH:mm:ss'),
-    charging_end: null // Open ended
+    charging_end: date.formatDate(twoHoursLater, 'HH:mm:ss')
   }
 
   const { error } = await supabase.from('charging_charts').insert([payload])
@@ -232,31 +303,102 @@ const quickLogCharge = async () => {
   if (error) {
     $q.notify({ type: 'negative', message: error.message })
   } else {
-    $q.notify({ type: 'positive', message: 'Charging started! Logged successfully.' })
+    $q.notify({ type: 'positive', message: 'Charging started! (2 Hours timer set)' })
     fetchLogs()
   }
   loggingCharge.value = false
 }
 
-const addBMELog = async () => {
+// --- BME CRUD ---
+
+const openAddBME = () => {
+  isEditMode.value = false
+  formBME.value = {
+    id: null,
+    reason: '',
+    status: 'Pending',
+    send_date: date.formatDate(Date.now(), 'YYYY-MM-DD'),
+    receive_date: ''
+  }
+  showBMEDialog.value = true
+}
+
+const openEditBME = (row) => {
+  isEditMode.value = true
+  formBME.value = { ...row }
+  showBMEDialog.value = true
+}
+
+const saveBMELog = async () => {
   const payload = {
     device_name: device.value.device_name,
     device_id: device.value.device_id,
     device_group: device.value.device_group,
-    reason: newBME.value.reason,
-    send_date: newBME.value.send_date,
-    receive_date: newBME.value.receive_date || null
+    reason: formBME.value.reason,
+    status: formBME.value.status,
+    send_date: formBME.value.send_date,
+    receive_date: formBME.value.receive_date || null
   }
   
-  const { error } = await supabase.from('bme_charts').insert([payload])
+  let error = null
+  if (isEditMode.value) {
+     const { error: err } = await supabase.from('bme_charts').update(payload).eq('id', formBME.value.id)
+     error = err
+  } else {
+     const { error: err } = await supabase.from('bme_charts').insert([payload])
+     error = err
+  }
   
   if (error) {
     $q.notify({ type: 'negative', message: error.message })
   } else {
-    $q.notify({ type: 'positive', message: 'BME Log added.' })
-    showAddBMEDialog.value = false
+    $q.notify({ type: 'positive', message: isEditMode.value ? 'BME Log updated' : 'BME Log added' })
+    showBMEDialog.value = false
     fetchLogs()
   }
+}
+
+// --- Charging CRUD (Edit/Delete) ---
+
+const openEditCharging = (row) => {
+  formCharging.value = { ...row }
+  showChargingDialog.value = true
+}
+
+const saveChargingLog = async () => {
+  const payload = {
+    charging_date: formCharging.value.charging_date,
+    charging_start: formCharging.value.charging_start,
+    charging_end: formCharging.value.charging_end
+  }
+
+  const { error } = await supabase.from('charging_charts').update(payload).eq('id', formCharging.value.id)
+  
+  if (error) {
+    $q.notify({ type: 'negative', message: error.message })
+  } else {
+    $q.notify({ type: 'positive', message: 'Charging log updated' })
+    showChargingDialog.value = false
+    fetchLogs()
+  }
+}
+
+const confirmDeleteLog = (table, id) => {
+  $q.dialog({
+    title: 'Confirm Delete',
+    message: 'Are you sure you want to delete this log?',
+    cancel: true,
+    persistent: true,
+    ok: { label: 'Delete', color: 'negative', flat: true }
+  }).onOk(async () => {
+    const { error } = await supabase.from(table).delete().eq('id', id)
+    if (error) {
+      $q.notify({ type: 'negative', message: error.message })
+    } else {
+      $q.notify({ type: 'positive', message: 'Log deleted' })
+      fetchLogs()
+    }
+  })
 }
 
 onMounted(async () => {
