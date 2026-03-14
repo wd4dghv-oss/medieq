@@ -176,9 +176,13 @@ import { supabase } from '../supabase'
 import { useQuasar } from 'quasar'
 import QRCode from 'qrcode'
 
+import { useAuthStore } from '../stores/auth'
+
 const $q = useQuasar()
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
+
 const devices = ref([])
 const loading = ref(true)
 
@@ -207,7 +211,8 @@ const formDevice = ref({
   device_id: '',
   device_group: '', 
   model_no: '',
-  serial_no: ''
+  serial_no: '',
+  ward: ''
 })
 
 // QR Code State
@@ -268,12 +273,19 @@ const getCategoryColor = (category) => {
 const fetchData = async () => {
   loading.value = true
   try {
-    const { data, error } = await supabase.from('devices').select('*').order('created_at', { ascending: false })
+    let query = supabase.from('devices').select('*').order('created_at', { ascending: false })
+    
+    // Filter by ward if user is not admin
+    if (authStore.profile?.role !== 'admin' && authStore.profile?.ward) {
+      query = query.eq('ward', authStore.profile.ward)
+    }
+
+    const { data, error } = await query
     if (error) throw error
     devices.value = data
   } catch (error) {
     console.error('Error:', error.message)
-    $q.notify({ type: 'negative', message: 'Error loading devices' })
+    $q.notify({ type: 'negative', message: 'Error loading devices: ' + error.message })
   } finally {
     loading.value = false
   }
@@ -287,7 +299,14 @@ const selectCategory = (name) => {
 // Add/Edit Dialog
 const openAddDialog = () => {
   isEditMode.value = false
-  formDevice.value = { device_name: '', device_id: '', device_group: '', model_no: '', serial_no: '' }
+  formDevice.value = { 
+    device_name: '', 
+    device_id: '', 
+    device_group: '', 
+    model_no: '', 
+    serial_no: '',
+    ward: authStore.profile?.ward || ''
+  }
   showDialog.value = true
 }
 
@@ -308,7 +327,8 @@ const saveDevice = async () => {
       device_group: formDevice.value.device_group,
       device_id: formDevice.value.device_id,
       model_no: formDevice.value.model_no,
-      serial_no: formDevice.value.serial_no
+      serial_no: formDevice.value.serial_no,
+      ward: formDevice.value.ward || authStore.profile?.ward
     }
 
     if (isEditMode.value) {
@@ -336,6 +356,7 @@ const saveDevice = async () => {
     $q.loading.hide()
   }
 }
+
 
 const confirmDelete = (device) => {
   $q.dialog({
@@ -397,10 +418,18 @@ const printQR = () => {
 }
 
 onMounted(async () => {
-  await fetchData()
+  if (!authStore.loading) {
+    await fetchData()
+  }
   
   if (route.query.category) {
     selectCategory(route.query.category)
+  }
+})
+
+watch(() => authStore.profile, async (newProfile) => {
+  if (newProfile) {
+    await fetchData()
   }
 })
 

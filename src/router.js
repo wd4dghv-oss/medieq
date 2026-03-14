@@ -25,37 +25,34 @@ const router = createRouter({
     routes
 })
 
+import { useAuthStore } from './stores/auth'
+
 router.beforeEach(async (to, from, next) => {
-    const { data: { session } } = await supabase.auth.getSession()
+    const authStore = useAuthStore()
+
+    // Ensure auth is initialized
+    if (authStore.loading) {
+        await authStore.initialize()
+    }
+
+    const isLoggedIn = !!authStore.user
 
     if (to.matched.some(record => record.meta.requiresAuth)) {
-        if (!session) {
+        if (!isLoggedIn) {
             next({ path: '/' })
             return
         }
 
         if (to.matched.some(record => record.meta.requiresAdmin)) {
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('role')
-                .eq('id', session.user.id)
-                .single()
-
-            if (profile?.role !== 'admin') {
+            if (authStore.profile?.role !== 'admin') {
                 next({ path: '/dashboard' })
                 return
             }
         }
     }
 
-    if (to.path === '/' && session) {
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', session.user.id)
-            .single()
-
-        if (profile?.role === 'admin') {
+    if (to.path === '/' && isLoggedIn) {
+        if (authStore.profile?.role === 'admin') {
             next({ path: '/admin' })
         } else {
             next({ path: '/dashboard' })
@@ -65,5 +62,6 @@ router.beforeEach(async (to, from, next) => {
 
     next()
 })
+
 
 export default router

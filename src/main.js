@@ -20,10 +20,16 @@ app.use(Quasar, {
         Notify,
         Loading,
         Dialog
-    }, // import Quasar plugins and add here
+    },
 })
 
 app.use(pinia)
 app.use(router)
 
-app.mount('#app')
+// Initialize auth store
+import { useAuthStore } from './stores/auth'
+const authStore = useAuthStore()
+authStore.initialize().then(() => {
+    app.mount('#app')
+})
+

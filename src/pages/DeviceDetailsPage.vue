@@ -29,7 +29,7 @@
           <q-separator />
 
           <!-- Quick Actions: "One Click Charge" -->
-          <q-card-section class="q-py-lg text-center bg-grey-1">
+          <q-card-section v-if="canEdit" class="q-py-lg text-center bg-grey-1">
              <div class="text-h6 q-mb-md">Quick Actions</div>
              <q-btn 
                push 
@@ -43,6 +43,12 @@
                @click="quickLogCharge"
              />
              <div class="q-mt-sm text-caption text-grey">Click to instantly record a charging start time</div>
+          </q-card-section>
+          <q-card-section v-else class="q-py-md text-center bg-blue-grey-1">
+             <div class="text-subtitle2 text-grey-8 italic">
+               <q-icon name="lock" class="q-mr-xs" />
+               Viewing device from {{ device.ward || 'another ward' }}
+             </div>
           </q-card-section>
         </q-card>
       </div>
@@ -81,8 +87,8 @@
                  </template>
                  <template v-slot:body-cell-actions="props">
                     <q-td :props="props">
-                      <q-btn flat round dense icon="edit" color="primary" @click="openEditCharging(props.row)" />
-                      <q-btn flat round dense icon="delete" color="negative" @click="confirmDeleteLog('charging_charts', props.row.id)" />
+                      <q-btn v-if="canEdit" flat round dense icon="edit" color="primary" @click="openEditCharging(props.row)" />
+                      <q-btn v-if="canEdit" flat round dense icon="delete" color="negative" @click="confirmDeleteLog('charging_charts', props.row.id)" />
                     </q-td>
                  </template>
                </q-table>
@@ -90,9 +96,6 @@
 
             <!-- BME Logs -->
             <q-tab-panel name="bme">
-               <div class="row justify-end q-mb-md">
-                  <q-btn color="secondary" label="Add BME Log" icon="add" size="sm" @click="openAddBME" />
-               </div>
                <q-table
                  :rows="bmeLogs"
                  :columns="bmeColumns"
@@ -100,6 +103,11 @@
                  flat
                  :loading="loadingLogs"
                >
+                 <template v-slot:top-right>
+                    <q-btn v-if="canEdit" color="secondary" label="Add BME Log" icon="add" size="sm" @click="openAddBME" />
+                    <q-btn flat round icon="refresh" @click="fetchLogs" class="q-ml-sm" />
+                 </template>
+
                  <template v-slot:body-cell-status="props">
                     <q-td :props="props">
                       <q-chip 
@@ -114,8 +122,8 @@
                  </template>
                  <template v-slot:body-cell-actions="props">
                     <q-td :props="props">
-                      <q-btn flat round dense icon="edit" color="primary" @click="openEditBME(props.row)" />
-                      <q-btn flat round dense icon="delete" color="negative" @click="confirmDeleteLog('bme_charts', props.row.id)" />
+                      <q-btn v-if="canEdit" flat round dense icon="edit" color="primary" @click="openEditBME(props.row)" />
+                      <q-btn v-if="canEdit" flat round dense icon="delete" color="negative" @click="confirmDeleteLog('bme_charts', props.row.id)" />
                     </q-td>
                  </template>
                </q-table>
@@ -185,8 +193,11 @@ import { useRoute } from 'vue-router'
 import { supabase } from '../supabase'
 import { useQuasar, date } from 'quasar'
 
+import { useAuthStore } from '../stores/auth'
+
 const $q = useQuasar()
 const route = useRoute()
+const authStore = useAuthStore()
 const deviceId = route.params.id // This is the ID from the URL (database ID)
 
 const device = ref(null)
@@ -222,6 +233,12 @@ const formCharging = ref({
 const statusLabel = computed(() => 'Active') 
 const statusColor = computed(() => 'positive')
 
+const canEdit = computed(() => {
+  if (!device.value) return false
+  if (authStore.profile?.role === 'admin') return true
+  return device.value.ward === authStore.profile?.ward
+})
+
 const chargingColumns = [
   { name: 'date', label: 'Date', field: 'charging_date', sortable: true, format: val => date.formatDate(val, 'YYYY-MM-DD'), align: 'left' },
   { name: 'start', label: 'Start Time', field: 'charging_start', sortable: true, align: 'left' },
@@ -236,6 +253,7 @@ const bmeColumns = [
   { name: 'receive', label: 'Received', field: 'receive_date', align: 'left' },
   { name: 'actions', label: 'Actions', field: 'actions', align: 'right' }
 ]
+
 
 // --- Actions ---
 
@@ -293,6 +311,7 @@ const quickLogCharge = async () => {
     device_name: device.value.device_name,
     device_id: device.value.device_id,
     device_group: device.value.device_group,
+    ward: authStore.profile?.ward, // Added ward
     charging_date: date.formatDate(now, 'YYYY-MM-DD'),
     charging_start: date.formatDate(now, 'HH:mm:ss'),
     charging_end: date.formatDate(twoHoursLater, 'HH:mm:ss')
@@ -334,11 +353,13 @@ const saveBMELog = async () => {
     device_name: device.value.device_name,
     device_id: device.value.device_id,
     device_group: device.value.device_group,
+    ward: authStore.profile?.ward, // Added ward
     reason: formBME.value.reason,
     status: formBME.value.status,
     send_date: formBME.value.send_date,
     receive_date: formBME.value.receive_date || null
   }
+
   
   let error = null
   if (isEditMode.value) {

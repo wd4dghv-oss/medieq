@@ -17,7 +17,7 @@
           <span style="letter-spacing: -0.5px">Medi</span><span class="text-secondary" style="letter-spacing: -0.5px">EQ</span>
         </q-toolbar-title>
 
-        <div v-if="user" class="row items-center">
+        <div v-if="authStore.user" class="row items-center">
            <!-- Notifications Tooltip & Menu -->
            <q-btn flat round dense icon="notifications" color="grey-7" class="q-mr-sm">
              <q-badge v-if="notifications.length > 0" color="red" floating rounded>{{ notifications.length }}</q-badge>
@@ -51,21 +51,24 @@
            </q-btn>
 
            <div class="column q-mr-md text-right gt-xs">
-              <div class="text-subtitle2 text-weight-bold no-margin line-height-tight">{{ user.email?.split('@')[0] }}</div>
-              <div class="text-caption text-grey-6 no-margin">{{ isAdmin ? 'Administrator' : 'Medical Staff' }}</div>
+              <div class="text-subtitle2 text-weight-bold no-margin line-height-tight">{{ authStore.user.email?.split('@')[0] }}</div>
+              <div class="text-caption text-grey-6 no-margin">
+                <q-icon name="meeting_room" size="xs" color="primary" v-if="authStore.profile?.ward" />
+                {{ authStore.profile?.ward || (isAdmin ? 'Admin' : 'Staff') }}
+              </div>
            </div>
 
            <!-- User Profile Menu -->
            <q-avatar color="primary" text-color="white" font-size="14px" class="cursor-pointer shadow-2">
-              {{ user.email?.charAt(0).toUpperCase() }}
+              {{ authStore.user.email?.charAt(0).toUpperCase() }}
               <q-menu class="rounded-borders" style="min-width: 200px">
                  <div class="row no-wrap q-pa-md items-center shadow-1">
                     <q-avatar size="48px" color="primary" text-color="white" class="q-mr-sm">
-                       {{ user.email?.charAt(0).toUpperCase() }}
+                       {{ authStore.user.email?.charAt(0).toUpperCase() }}
                     </q-avatar>
                     <div>
-                       <div class="text-subtitle2 text-weight-bold">{{ user.email?.split('@')[0] }}</div>
-                       <div class="text-caption text-grey">{{ isAdmin ? 'Admin' : 'Staff' }}</div>
+                       <div class="text-subtitle2 text-weight-bold">{{ authStore.user.email?.split('@')[0] }}</div>
+                       <div class="text-caption text-grey">{{ authStore.profile?.ward || (isAdmin ? 'Admin' : 'Staff') }}</div>
                     </div>
                  </div>
                  
@@ -112,7 +115,7 @@
             clickable 
             v-ripple 
             @click="goToDashboard"
-            v-if="user" 
+            v-if="authStore.user" 
             :active="route.path === '/dashboard' && !route.query.category"
             active-class="active-menu-item"
             class="q-mb-sm menu-item"
@@ -190,22 +193,23 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '../supabase'
 import { useQuasar } from 'quasar'
+import { useAuthStore } from '../stores/auth'
 
 const $q = useQuasar()
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
+
 const leftDrawerOpen = ref(false)
-const user = ref(null)
-const profile = ref(null)
 const notifications = ref([])
 
 // Refresh alerts on navigation
 watch(() => route.path, () => {
-   if (user.value) checkAllAlerts()
+   if (authStore.user) checkAllAlerts()
 })
 
 const isAdmin = computed(() => {
-  return profile.value?.role === 'admin'
+  return authStore.profile?.role === 'admin'
 })
 
 function toggleLeftDrawer () {
@@ -234,26 +238,33 @@ const goToDashboard = () => {
 }
 
 const openNotification = (notif) => {
-  // Navigate to device
   router.push(`/device/${notif.id}`)
-  // We no longer remove it locally, it will persist until the database is updated
 }
 
 const checkAllAlerts = async () => {
    try {
-      const { data: devices } = await supabase.from('devices').select('id, device_name, device_id')
+      // Filter alerts by ward for users
+      let deviceQuery = supabase.from('devices').select('id, device_name, device_id, ward')
+      if (!isAdmin.value && authStore.profile?.ward) {
+        deviceQuery = deviceQuery.eq('ward', authStore.profile.ward)
+      }
+      const { data: devices } = await deviceQuery
       if (!devices) return
+
+      const deviceIds = devices.map(d => d.device_id)
 
       // Charging Alerts
       const { data: allCharges } = await supabase
          .from('charging_charts')
          .select('device_id, created_at')
+         .in('device_id', deviceIds)
          .order('created_at', { ascending: false })
 
-      // BME Alerts - Get all where receive_date is null
+      // BME Alerts
       const { data: bmeLogs } = await supabase
          .from('bme_charts')
          .select('device_id, status, send_date, receive_date')
+         .in('device_id', deviceIds)
          .is('receive_date', null)
          .order('send_date', { ascending: false })
 
@@ -262,7 +273,6 @@ const checkAllAlerts = async () => {
       weekAgo.setDate(weekAgo.getDate() - 7)
 
       devices.forEach(dev => {
-         // 1. Charge Logic: Notify if last charge > 7 days or never charged
          const lastChargeEntry = allCharges?.find(c => c.device_id === dev.device_id)
          const lastChargeDate = lastChargeEntry ? new Date(lastChargeEntry.created_at) : null
          
@@ -275,7 +285,6 @@ const checkAllAlerts = async () => {
             })
          }
 
-         // 2. BME Logic: Notify if there is ANY BME record with no receive_date
          const pendingBme = bmeLogs?.find(b => b.device_id === dev.device_id)
          if (pendingBme) {
             alerts.push({
@@ -302,40 +311,26 @@ const handleLogout = async () => {
     message: 'Logged out successfully',
     position: 'top'
   })
-  user.value = null
-  profile.value = null
+  notifications.value = []
 }
 
 let alertInterval = null
 
 onMounted(async () => {
-  // Apply saved dark mode state
   const savedDarkMode = localStorage.getItem('darkMode') === 'true'
   $q.dark.set(savedDarkMode)
 
-  const { data: { session } } = await supabase.auth.getSession()
-  if (session) {
-    user.value = session.user
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', session.user.id)
-      .single()
-    profile.value = data
-    
-    // Check Alerts immediately
+  if (authStore.user) {
     checkAllAlerts()
   }
 
-  // Auto-refresh alerts every 30 seconds
   alertInterval = setInterval(checkAllAlerts, 30000)
 
-  supabase.auth.onAuthStateChange((_event, session) => {
-    user.value = session?.user || null
+  supabase.auth.onAuthStateChange(async (_event, session) => {
     if (!session) {
-       profile.value = null
        notifications.value = []
     } else {
+       await authStore.fetchProfile(session.user.id)
        checkAllAlerts()
     }
   })
@@ -344,11 +339,7 @@ onMounted(async () => {
 onUnmounted(() => {
    if (alertInterval) clearInterval(alertInterval)
 })
-</script>
 
-<script>
-// Separate script block for global style logic if needed, 
-// but we'll stick to script setup for logic.
 </script>
 
 <style>
