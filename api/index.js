@@ -221,5 +221,5 @@ app.post('/api/query', async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`PostgreSQL backend running on port ${PORT}`));
+// For Vercel Serverless Functions
+export default app;
